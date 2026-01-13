@@ -1,6 +1,7 @@
 """
 Module for parsing dual symbol specification formats:
 - file.py::SymbolName (by name)
+- file.py::Symbol1,Symbol2,Symbol3 (multiple symbols by name)
 - file.py:line:column (by position)
 """
 import ast
@@ -21,6 +22,14 @@ class SymbolByName:
 
 
 @dataclass
+class SymbolsByName:
+    """Represents multiple symbols specified by name (comma-separated)."""
+
+    file_path: Path
+    symbol_names: list[str]
+
+
+@dataclass
 class SymbolByPosition:
     """Represents a symbol specified by line:column position."""
 
@@ -29,10 +38,14 @@ class SymbolByPosition:
     column: int
 
 
-TargetSpec = Union[SymbolByName, SymbolByPosition]
+TargetSpec = Union[SymbolByName, SymbolsByName, SymbolByPosition]
 
 # Regex patterns
+# Single symbol: file.py::symbol
 NAME_PATTERN = re.compile(r"^(.+\.py)::(\w+)$")
+# Multiple symbols: file.py::symbol1,symbol2,symbol3
+MULTI_NAME_PATTERN = re.compile(r"^(.+\.py)::(\w+(?:,\w+)+)$")
+# Position: file.py:line:column
 POSITION_PATTERN = re.compile(r"^(.+\.py):(\d+):(\d+)$")
 
 
@@ -41,15 +54,27 @@ def parse_target(target: str) -> TargetSpec:
     Parse a target specification string into a structured object.
 
     Args:
-        target: Either 'file.py::SymbolName' or 'file.py:line:column'
+        target: One of:
+            - 'file.py::SymbolName' (single symbol by name)
+            - 'file.py::Symbol1,Symbol2' (multiple symbols by name)
+            - 'file.py:line:column' (single symbol by position)
 
     Returns:
-        SymbolByName or SymbolByPosition
+        SymbolByName, SymbolsByName, or SymbolByPosition
 
     Raises:
         TargetParseError: If the target format is invalid
     """
-    # Try name format first (file.py::SymbolName)
+    # Try multi-symbol format first (file.py::sym1,sym2,sym3)
+    multi_match = MULTI_NAME_PATTERN.match(target)
+    if multi_match:
+        symbols = multi_match.group(2).split(",")
+        return SymbolsByName(
+            file_path=Path(multi_match.group(1)),
+            symbol_names=symbols,
+        )
+
+    # Try single name format (file.py::SymbolName)
     name_match = NAME_PATTERN.match(target)
     if name_match:
         return SymbolByName(
@@ -67,7 +92,7 @@ def parse_target(target: str) -> TargetSpec:
 
     raise TargetParseError(
         f"Invalid target format: '{target}'. "
-        f"Use 'file.py::SymbolName' or 'file.py:line:column'"
+        f"Use 'file.py::SymbolName', 'file.py::Sym1,Sym2', or 'file.py:line:column'"
     )
 
 

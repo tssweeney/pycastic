@@ -6,13 +6,21 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from .errors import AmbiguousSymbolError, RefactoringError, SymbolNotFoundError
-from .parsing import SymbolByName, SymbolByPosition, TargetSpec
+from .dependencies import DependencyAnalyzer, ImportDependency, resolve_move_dependencies
+from .errors import (
+    AmbiguousSymbolError,
+    CircularDependencyError,
+    RefactoringError,
+    SymbolNotFoundError,
+)
+from .parsing import SymbolByName, SymbolByPosition, SymbolsByName, TargetSpec
 from .refactor import (
     add_definition,
     add_import,
+    ensure_imports,
     extract_definition,
     remove_definition,
+    remove_unused_imports,
     rename_attribute_in_source,
     rename_in_source,
     update_imports_in_source,
@@ -57,15 +65,18 @@ def _find_symbol_name_at_position(file_path: Path, line: int, column: int) -> st
     return symbol_name
 
 
-def _resolve_target(project_root: Path, target: TargetSpec) -> tuple[Path, str]:
-    """Resolve a target specification to a file path and symbol name."""
+def _resolve_target(project_root: Path, target: TargetSpec) -> tuple[Path, list[str]]:
+    """Resolve a target specification to a file path and list of symbol names."""
     if isinstance(target, SymbolByName):
         file_path = project_root / target.file_path
-        return file_path, target.symbol_name
+        return file_path, [target.symbol_name]
+    elif isinstance(target, SymbolsByName):
+        file_path = project_root / target.file_path
+        return file_path, target.symbol_names
     elif isinstance(target, SymbolByPosition):
         file_path = project_root / target.file_path
         symbol_name = _find_symbol_name_at_position(file_path, target.line, target.column)
-        return file_path, symbol_name
+        return file_path, [symbol_name]
     else:
         raise RefactoringError(f"Unknown target type: {type(target)}")
 
@@ -125,7 +136,12 @@ def rename_symbol(
     info_messages = []
 
     try:
-        file_path, old_name = _resolve_target(project_root, target)
+        file_path, symbol_names = _resolve_target(project_root, target)
+
+        # Rename only supports single symbol
+        if len(symbol_names) > 1:
+            raise RefactoringError("rename only supports a single symbol. Use file.py::SymbolName format.")
+        old_name = symbol_names[0]
 
         if not file_path.exists():
             raise RefactoringError(f"File not found: {file_path}")
@@ -236,83 +252,207 @@ def move_symbol(
     target: TargetSpec,
     destination_file: Path,
     dry_run: bool = False,
-) -> list[str]:
+    include_deps: bool = False,
+    shared_file: Optional[Path] = None,
+) -> tuple[list[str], list[str]]:
     """
-    Move a symbol to another file.
+    Move symbol(s) to another file with full dependency handling.
 
     Args:
         project_root: Path to the project root
-        target: Parsed target specification
+        target: Parsed target specification (single or multiple symbols)
         destination_file: Path to the destination file (relative to project root)
         dry_run: If True, return description without applying
+        include_deps: If True, include shared dependencies in the move
+        shared_file: If set, extract shared dependencies to this file
 
     Returns:
-        List of changed file paths (or descriptions if dry_run)
+        Tuple of (list of changed file paths, list of info messages)
+
+    Raises:
+        CircularDependencyError: When shared dependencies exist and neither
+            include_deps nor shared_file is specified
     """
+    info_messages = []
+
     try:
-        source_file, symbol_name = _resolve_target(project_root, target)
+        source_file, initial_symbols = _resolve_target(project_root, target)
         dest_file = project_root / destination_file
 
         if not source_file.exists():
             raise RefactoringError(f"Source file not found: {source_file}")
 
+        # Resolve dependencies
+        final_move_list, shared_deps, required_imports = resolve_move_dependencies(
+            source_file, initial_symbols, include_shared_deps=include_deps
+        )
+
+        # Handle shared dependencies
+        if shared_deps and not include_deps and not shared_file:
+            # Default shared file path
+            default_shared = source_file.parent / f"{source_file.stem}_common.py"
+            rel_default = default_shared.relative_to(project_root)
+            raise CircularDependencyError(
+                f"The following symbols are used by both moved and remaining code:\n"
+                f"  {', '.join(shared_deps)}\n\n"
+                f"Options:\n"
+                f"  --include-deps    Include these symbols in the move\n"
+                f"  --shared-file     Extract to a common file (default: {rel_default})",
+                shared_symbols=shared_deps
+            )
+
+        # Log what we're moving
+        auto_included = set(final_move_list) - set(initial_symbols)
+        if auto_included:
+            info_messages.append(f"Auto-including dependencies: {', '.join(auto_included)}")
+
         # Create destination file if it doesn't exist
-        dest_file_created = False
         if not dest_file.exists():
-            # Create parent directories if needed
             dest_file.parent.mkdir(parents=True, exist_ok=True)
             _ensure_package_init_files(dest_file.parent, project_root)
-            # Create empty Python file
             dest_file.write_text(f'"""{dest_file.stem} module."""\n')
-            dest_file_created = True
 
-        # Extract the definition
-        source_content = source_file.read_text()
-        definition_code = extract_definition(source_content, symbol_name)
-        if not definition_code:
-            raise SymbolNotFoundError(f"Symbol '{symbol_name}' not found in {source_file}")
+        # Handle shared file if specified
+        shared_file_path = None
+        if shared_file and shared_deps:
+            shared_file_path = project_root / shared_file
+            if not shared_file_path.exists():
+                shared_file_path.parent.mkdir(parents=True, exist_ok=True)
+                _ensure_package_init_files(shared_file_path.parent, project_root)
+                shared_file_path.write_text(f'"""{shared_file_path.stem} module."""\n')
+            info_messages.append(f"Extracting shared deps to: {shared_file}")
 
         changes = {}
+        source_content = source_file.read_text()
+        analyzer = DependencyAnalyzer(source_file)
 
-        # Remove from source file
-        new_source, removed = remove_definition(source_content, symbol_name)
-        if removed:
-            changes[source_file] = new_source
+        # --- Move shared dependencies first (if --shared-file) ---
+        if shared_file_path and shared_deps:
+            shared_content = shared_file_path.read_text()
+            for sym in shared_deps:
+                code = analyzer.get_symbol_code(sym)
+                shared_content = add_definition(shared_content, code)
+                source_content, _ = remove_definition(source_content, sym)
 
-        # Add to destination file
+            # Add imports needed by shared deps
+            shared_required = []
+            for sym in shared_deps:
+                deps = analyzer.analyze_symbol(sym)
+                for imp in deps.required_imports:
+                    shared_required.append((imp.module, imp.name, imp.alias, imp.is_from_import))
+            if shared_required:
+                shared_content = ensure_imports(shared_content, shared_required)
+
+            changes[shared_file_path] = shared_content
+
+        # --- Extract and move main symbols ---
         dest_content = dest_file.read_text()
-        new_dest = add_definition(dest_content, definition_code)
-        changes[dest_file] = new_dest
+        moved_symbols = []
 
-        # Update imports in all files
-        source_module = _path_to_module(source_file, project_root)
+        for symbol_name in final_move_list:
+            try:
+                code = analyzer.get_symbol_code(symbol_name)
+            except ValueError:
+                # Symbol might have been moved to shared file
+                continue
+
+            dest_content = add_definition(dest_content, code)
+            source_content, removed = remove_definition(source_content, symbol_name)
+            if removed:
+                moved_symbols.append(symbol_name)
+
+        # Add required imports to destination
+        imports_to_add = []
+        for imp in required_imports:
+            imports_to_add.append((imp.module, imp.name, imp.alias, imp.is_from_import))
+
+        # Also add imports for shared deps if they were extracted
+        if shared_file_path and shared_deps:
+            shared_module = _path_to_module(shared_file_path, project_root)
+            for sym in shared_deps:
+                imports_to_add.append((shared_module, sym, None, True))
+
+        if imports_to_add:
+            dest_content = ensure_imports(dest_content, imports_to_add)
+
+        changes[dest_file] = dest_content
+
+        # --- Update source file ---
+        # Remove unused imports from source
+        source_content, removed_imports = remove_unused_imports(source_content)
+        if removed_imports:
+            info_messages.append(f"Removed unused imports from source: {', '.join(removed_imports)}")
+
+        # Check if source still uses any moved symbols - add imports if so
+        source_needs_imports = []
         dest_module = _path_to_module(dest_file, project_root)
 
+        # Simple check: scan source for moved symbol names
+        for sym in moved_symbols:
+            if sym in source_content:
+                source_needs_imports.append((dest_module, sym, None, True))
+
+        # Also add imports for shared deps that were extracted to shared file
+        if shared_file_path and shared_deps:
+            shared_module = _path_to_module(shared_file_path, project_root)
+            for sym in shared_deps:
+                if sym in source_content:
+                    source_needs_imports.append((shared_module, sym, None, True))
+
+        if source_needs_imports:
+            source_content = ensure_imports(source_content, source_needs_imports)
+            info_messages.append(f"Added imports to source for: {', '.join(s[1] for s in source_needs_imports)}")
+
+        changes[source_file] = source_content
+
+        # --- Update imports in all other files ---
+        source_module = _path_to_module(source_file, project_root)
+
         for py_file in _get_python_files(project_root):
-            if py_file in (source_file, dest_file):
+            if py_file in changes:
                 continue
 
             content = py_file.read_text()
-            new_content, count = update_imports_in_source(
-                content,
-                old_module=source_module,
-                new_module=dest_module,
-                old_name=symbol_name,
-                new_name=symbol_name,
-            )
-            if count > 0 and new_content != content:
-                changes[py_file] = new_content
+            original_content = content
+            total_changes = 0
+
+            # Update imports for each moved symbol
+            for sym in moved_symbols:
+                content, count = update_imports_in_source(
+                    content,
+                    old_module=source_module,
+                    new_module=dest_module,
+                    old_name=sym,
+                    new_name=sym,
+                )
+                total_changes += count
+
+            # Update imports for shared deps if extracted
+            if shared_file_path and shared_deps:
+                shared_module = _path_to_module(shared_file_path, project_root)
+                for sym in shared_deps:
+                    content, count = update_imports_in_source(
+                        content,
+                        old_module=source_module,
+                        new_module=shared_module,
+                        old_name=sym,
+                        new_name=sym,
+                    )
+                    total_changes += count
+
+            if total_changes > 0 and content != original_content:
+                changes[py_file] = content
 
         if dry_run:
-            return _format_dry_run_changes(changes, project_root)
+            return _format_dry_run_changes(changes, project_root), info_messages
 
         # Apply changes
         for path, content in changes.items():
             path.write_text(content)
 
-        return [str(p.relative_to(project_root)) for p in changes.keys()]
+        return [str(p.relative_to(project_root)) for p in changes.keys()], info_messages
 
-    except (SymbolNotFoundError, RefactoringError):
+    except (SymbolNotFoundError, RefactoringError, CircularDependencyError):
         raise
     except Exception as e:
         raise RefactoringError(f"Failed to move symbol: {e}") from e

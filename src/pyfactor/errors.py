@@ -34,9 +34,21 @@ class AmbiguousSymbolError(PyfactorError):
 
 
 class RefactoringError(PyfactorError):
-    """Error during rope refactoring operation."""
+    """Error during refactoring operation."""
 
     pass
+
+
+class CircularDependencyError(PyfactorError):
+    """Raised when moving a symbol would create a circular import.
+
+    This occurs when a symbol depends on another symbol in the same file
+    that is also used by symbols that are NOT being moved.
+    """
+
+    def __init__(self, message: str, shared_symbols: list[str] = None):
+        super().__init__(message)
+        self.shared_symbols = shared_symbols or []
 
 
 class ProjectError(PyfactorError):

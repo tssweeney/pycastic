@@ -112,7 +112,7 @@ class TestMoveSymbol:
     def test_move_function_dry_run(self, temp_project):
         """Test moving a function with dry run."""
         target = parse_target("utils.py::helper_function")
-        result = move_symbol(
+        result, info_messages = move_symbol(
             temp_project, target, Path("main.py"), dry_run=True
         )
         assert len(result) > 0
@@ -120,7 +120,7 @@ class TestMoveSymbol:
     def test_move_function(self, temp_project):
         """Test actually moving a function."""
         target = parse_target("utils.py::helper_function")
-        result = move_symbol(
+        result, info_messages = move_symbol(
             temp_project, target, Path("main.py"), dry_run=False
         )
 
@@ -204,7 +204,7 @@ def other():
 """)
 
         target = parse_target("source.py::helper")
-        result = move_symbol(tmp_path, target, Path("new_module.py"), dry_run=False)
+        result, info_messages = move_symbol(tmp_path, target, Path("new_module.py"), dry_run=False)
 
         # Verify destination file was created
         assert (tmp_path / "new_module.py").exists()
@@ -227,7 +227,7 @@ def my_func():
 """)
 
         target = parse_target("source.py::my_func")
-        result = move_symbol(tmp_path, target, Path("pkg/subpkg/dest.py"), dry_run=False)
+        result, info_messages = move_symbol(tmp_path, target, Path("pkg/subpkg/dest.py"), dry_run=False)
 
         # Verify nested structure was created
         assert (tmp_path / "pkg" / "subpkg" / "dest.py").exists()
@@ -279,3 +279,279 @@ def helper():
         assert len(info_messages) > 0
         assert any("also defined" in msg for msg in info_messages)
         assert any("file2.py" in msg for msg in info_messages)
+
+
+class TestMoveSymbolDependencies:
+    """Tests for move_symbol dependency handling."""
+
+    def test_move_updates_imports_in_using_files(self, tmp_path):
+        """Files that import the moved symbol get updated imports."""
+        # Create source file with a function
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def helper():
+    return 42
+''')
+
+        # Create a file that imports helper
+        (tmp_path / "main.py").write_text('''"""Main module."""
+from utils import helper
+
+
+def run():
+    return helper()
+''')
+
+        # Move helper to new file
+        target = parse_target("utils.py::helper")
+        result, info = move_symbol(tmp_path, target, Path("helpers.py"), dry_run=False)
+
+        # Check main.py now imports from helpers
+        main_content = (tmp_path / "main.py").read_text()
+        assert "from helpers import helper" in main_content
+        assert "from utils import helper" not in main_content
+
+    def test_move_copies_required_imports(self, tmp_path):
+        """Imports used by moved symbol are copied to destination."""
+        # Create source file with a function that uses datetime
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+from datetime import datetime
+
+
+def get_timestamp():
+    return datetime.now()
+
+
+def other_func():
+    return 42
+''')
+
+        # Move get_timestamp to new file
+        target = parse_target("utils.py::get_timestamp")
+        result, info = move_symbol(tmp_path, target, Path("timestamps.py"), dry_run=False)
+
+        # Check destination has the import
+        dest_content = (tmp_path / "timestamps.py").read_text()
+        assert "from datetime import datetime" in dest_content
+        assert "def get_timestamp" in dest_content
+
+    def test_move_includes_unused_internal_deps(self, tmp_path):
+        """Internal dependencies not used elsewhere are moved too."""
+        # Create source file where main_func depends on helper (unused elsewhere)
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def internal_helper():
+    return 42
+
+
+def main_func():
+    return internal_helper() + 1
+
+
+def other_func():
+    return 100
+''')
+
+        # Move main_func - should also move internal_helper
+        target = parse_target("utils.py::main_func")
+        result, info = move_symbol(tmp_path, target, Path("funcs.py"), dry_run=False)
+
+        # Check both were moved to destination
+        dest_content = (tmp_path / "funcs.py").read_text()
+        assert "def main_func" in dest_content
+        assert "def internal_helper" in dest_content
+
+        # Check both were removed from source
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "def main_func" not in source_content
+        assert "def internal_helper" not in source_content
+        assert "def other_func" in source_content  # This should remain
+
+    def test_move_raises_on_shared_internal_deps(self, tmp_path):
+        """Shared internal dependencies raise CircularDependencyError."""
+        from pyfactor.errors import CircularDependencyError
+
+        # Create source file where shared_helper is used by both func_a and func_b
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def shared_helper():
+    return 42
+
+
+def func_a():
+    return shared_helper() + 1
+
+
+def func_b():
+    return shared_helper() + 2
+''')
+
+        # Try to move func_a - should fail because shared_helper is used by func_b too
+        target = parse_target("utils.py::func_a")
+        with pytest.raises(CircularDependencyError) as exc_info:
+            move_symbol(tmp_path, target, Path("dest.py"), dry_run=False)
+
+        assert "shared_helper" in str(exc_info.value)
+
+    def test_move_with_include_deps_flag(self, tmp_path):
+        """--include-deps moves shared dependencies anyway."""
+        # Create source file with shared dependency
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def shared_helper():
+    return 42
+
+
+def func_a():
+    return shared_helper() + 1
+
+
+def func_b():
+    return shared_helper() + 2
+''')
+
+        # Move func_a with include_deps=True
+        target = parse_target("utils.py::func_a")
+        result, info = move_symbol(
+            tmp_path, target, Path("dest.py"), dry_run=False, include_deps=True
+        )
+
+        # Both func_a and shared_helper should be in destination
+        dest_content = (tmp_path / "dest.py").read_text()
+        assert "def func_a" in dest_content
+        assert "def shared_helper" in dest_content
+
+        # func_b should still be in source, and it should import shared_helper
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "def func_b" in source_content
+        assert "def shared_helper" not in source_content
+        assert "from dest import shared_helper" in source_content
+
+    def test_move_with_shared_file_option(self, tmp_path):
+        """--shared-file extracts shared deps to common file."""
+        # Create source file with shared dependency
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def shared_helper():
+    return 42
+
+
+def func_a():
+    return shared_helper() + 1
+
+
+def func_b():
+    return shared_helper() + 2
+''')
+
+        # Move func_a with shared_file option
+        target = parse_target("utils.py::func_a")
+        result, info = move_symbol(
+            tmp_path, target, Path("dest.py"), dry_run=False, shared_file=Path("common.py")
+        )
+
+        # func_a should be in dest.py
+        dest_content = (tmp_path / "dest.py").read_text()
+        assert "def func_a" in dest_content
+        assert "from common import shared_helper" in dest_content
+
+        # shared_helper should be in common.py
+        common_content = (tmp_path / "common.py").read_text()
+        assert "def shared_helper" in common_content
+
+        # func_b should still be in source, importing from common
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "def func_b" in source_content
+        assert "from common import shared_helper" in source_content
+
+    def test_move_multiple_symbols(self, tmp_path):
+        """Moving multiple symbols at once works correctly."""
+        # Create source file with multiple functions
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def func_one():
+    return 1
+
+
+def func_two():
+    return 2
+
+
+def func_three():
+    return 3
+''')
+
+        # Move two functions at once
+        target = parse_target("utils.py::func_one,func_two")
+        result, info = move_symbol(tmp_path, target, Path("dest.py"), dry_run=False)
+
+        # Both should be in destination
+        dest_content = (tmp_path / "dest.py").read_text()
+        assert "def func_one" in dest_content
+        assert "def func_two" in dest_content
+
+        # Both should be removed from source
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "def func_one" not in source_content
+        assert "def func_two" not in source_content
+        assert "def func_three" in source_content  # This should remain
+
+    def test_move_removes_unused_imports_from_original(self, tmp_path):
+        """Unused imports are removed from original file after move."""
+        # Create source file with function using datetime
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+from datetime import datetime
+
+
+def get_timestamp():
+    return datetime.now()
+
+
+def other_func():
+    return 42
+''')
+
+        # Move get_timestamp (only user of datetime)
+        target = parse_target("utils.py::get_timestamp")
+        result, info = move_symbol(tmp_path, target, Path("timestamps.py"), dry_run=False)
+
+        # datetime import should be removed from source
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "from datetime import datetime" not in source_content
+        assert "def other_func" in source_content
+
+        # datetime import should be in destination
+        dest_content = (tmp_path / "timestamps.py").read_text()
+        assert "from datetime import datetime" in dest_content
+
+    def test_move_adds_import_to_original_if_needed(self, tmp_path):
+        """If original file still uses moved symbol, add import."""
+        # Create source file where other_func calls moved_func
+        (tmp_path / "utils.py").write_text('''"""Utils module."""
+
+
+def moved_func():
+    return 42
+
+
+def other_func():
+    return moved_func() + 1
+''')
+
+        # Move moved_func
+        target = parse_target("utils.py::moved_func")
+        result, info = move_symbol(tmp_path, target, Path("dest.py"), dry_run=False)
+
+        # Source should import moved_func from dest
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "from dest import moved_func" in source_content
+
+        # Destination should have the function
+        dest_content = (tmp_path / "dest.py").read_text()
+        assert "def moved_func" in dest_content

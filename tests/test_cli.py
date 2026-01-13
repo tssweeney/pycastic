@@ -139,7 +139,7 @@ class TestMoveCommand:
         """Test move --help."""
         result = runner.invoke(app, ["move", "--help"])
         assert result.exit_code == 0
-        assert "Move a symbol" in result.stdout
+        assert "Move symbol(s)" in result.stdout
 
     def test_move_dry_run(self, cli_project):
         """Test move with --dry-run."""

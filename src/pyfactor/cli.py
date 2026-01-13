@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from . import __version__
 from .core import move_file, move_symbol, rename_file, rename_symbol
-from .errors import AmbiguousSymbolError, PyfactorError
+from .errors import AmbiguousSymbolError, CircularDependencyError, PyfactorError
 from .parsing import parse_target
 
 app = typer.Typer(
@@ -130,7 +130,7 @@ def move(
     target: Annotated[
         str,
         typer.Argument(
-            help="Target symbol: 'file.py::SymbolName' or 'file.py:line:column'",
+            help="Target: 'file.py::Symbol', 'file.py::Sym1,Sym2', or 'file.py:line:col'",
         ),
     ],
     destination_file: Annotated[
@@ -147,19 +147,70 @@ def move(
             help="Show changes without applying them.",
         ),
     ] = False,
+    include_deps: Annotated[
+        bool,
+        typer.Option(
+            "--include-deps",
+            help="Include shared dependencies in the move (instead of erroring).",
+        ),
+    ] = False,
+    use_shared_file: Annotated[
+        bool,
+        typer.Option(
+            "--shared-file/--no-shared-file",
+            help="Extract shared dependencies to a common file (default: {source}_common.py)",
+        ),
+    ] = False,
+    shared_file_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--shared-file-path",
+            help="Custom path for shared dependencies file (implies --shared-file)",
+        ),
+    ] = None,
 ):
     """
-    Move a symbol from one file to another.
+    Move symbol(s) from one file to another.
+
+    Automatically handles dependencies:
+    - External imports are copied to destination
+    - Internal deps not used elsewhere are moved automatically
+    - Shared deps (used by moved AND remaining code) require --include-deps or --shared-file
 
     Examples:
-        pyfactor move . src/old_module.py::MyClass src/new_module.py
-        pyfactor move /path/to/project lib/utils.py:25:0 lib/helpers.py
+        pyfactor move . src/utils.py::helper src/helpers.py
+        pyfactor move . src/utils.py::func1,func2 src/funcs.py
+        pyfactor move . src/utils.py::my_func dest.py --include-deps
+        pyfactor move . src/utils.py::my_func dest.py --shared-file
+        pyfactor move . src/utils.py::my_func dest.py --shared-file-path src/common.py
     """
     try:
         parsed_target = parse_target(target)
-        changed_files = move_symbol(
-            project_root, parsed_target, destination_file, dry_run
+
+        # Determine shared file path
+        resolved_shared_file: Optional[Path] = None
+        if shared_file_path is not None:
+            # Explicit path provided
+            resolved_shared_file = shared_file_path
+        elif use_shared_file:
+            # Use default: {source}_common.py
+            source_path = Path(parsed_target.file_path)
+            resolved_shared_file = source_path.parent / f"{source_path.stem}_common.py"
+
+        changed_files, info_messages = move_symbol(
+            project_root,
+            parsed_target,
+            destination_file,
+            dry_run=dry_run,
+            include_deps=include_deps,
+            shared_file=resolved_shared_file,
         )
+
+        # Display info messages
+        for msg in info_messages:
+            console.print(f"[dim]{msg}[/dim]")
+        if info_messages:
+            console.print()
 
         if dry_run:
             console.print(
@@ -170,12 +221,15 @@ def move(
             )
         else:
             console.print(
-                f"[green]Successfully moved symbol to '{destination_file}'[/green]"
+                f"[green]Successfully moved symbol(s) to '{destination_file}'[/green]"
             )
             console.print(f"Changed {len(changed_files)} file(s):")
             for f in changed_files:
                 console.print(f"  - {f}")
 
+    except CircularDependencyError as e:
+        console.print(f"[yellow]Shared dependency conflict:[/yellow]\n{e}")
+        raise typer.Exit(code=1)
     except PyfactorError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)

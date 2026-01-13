@@ -9,6 +9,7 @@ from typing import Optional, Union
 
 import libcst as cst
 from libcst import matchers as m
+from libcst.metadata import MetadataWrapper
 
 
 class RenameTransformer(cst.CSTTransformer):
@@ -430,6 +431,241 @@ def add_import(source: str, module: str, name: str, alias: Optional[str] = None)
                 whitespace_after_import=cst.SimpleWhitespace(" "),
             )
         ]
+    )
+
+    # Find the right place to insert (after existing imports)
+    insert_idx = 0
+    for i, stmt in enumerate(tree.body):
+        if isinstance(stmt, cst.SimpleStatementLine):
+            for body_stmt in stmt.body:
+                if isinstance(body_stmt, (cst.Import, cst.ImportFrom)):
+                    insert_idx = i + 1
+
+    new_body = list(tree.body)
+    new_body.insert(insert_idx, import_stmt)
+    new_tree = tree.with_changes(body=new_body)
+    return new_tree.code
+
+
+class UsedNamesCollector(cst.CSTVisitor):
+    """Collects all Name nodes used in the code (excluding import statements)."""
+
+    def __init__(self):
+        self.names: set[str] = set()
+        self._in_import = False
+
+    def visit_Import(self, node: cst.Import) -> bool:
+        self._in_import = True
+        return True
+
+    def leave_Import(self, node: cst.Import) -> None:
+        self._in_import = False
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
+        self._in_import = True
+        return True
+
+    def leave_ImportFrom(self, node: cst.ImportFrom) -> None:
+        self._in_import = False
+
+    def visit_Name(self, node: cst.Name) -> bool:
+        if not self._in_import:
+            self.names.add(node.value)
+        return True
+
+
+class ImportedNamesCollector(cst.CSTVisitor):
+    """Collects all names that are imported."""
+
+    def __init__(self):
+        # Maps local name -> (module, imported_name, alias, is_from_import)
+        self.imports: dict[str, tuple[str, str, Optional[str], bool]] = {}
+
+    def visit_Import(self, node: cst.Import) -> bool:
+        if isinstance(node.names, cst.ImportStar):
+            return False
+        for alias in node.names:
+            if isinstance(alias.name, cst.Name):
+                name = alias.name.value
+            else:
+                name = _get_dotted_name_str(alias.name)
+            local_name = alias.asname.name.value if alias.asname else name.split(".")[0]
+            alias_str = alias.asname.name.value if alias.asname else None
+            self.imports[local_name] = (name, name, alias_str, False)
+        return False
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
+        if isinstance(node.names, cst.ImportStar):
+            return False
+        module = ""
+        if node.module:
+            module = _get_dotted_name_str(node.module)
+        relative_prefix = "." * len(node.relative) if node.relative else ""
+        full_module = relative_prefix + module
+
+        for alias in node.names:
+            name = alias.name.value
+            local_name = alias.asname.name.value if alias.asname else name
+            alias_str = alias.asname.name.value if alias.asname else None
+            self.imports[local_name] = (full_module, name, alias_str, True)
+        return False
+
+
+class UnusedImportRemover(cst.CSTTransformer):
+    """Removes unused imports from source code."""
+
+    def __init__(self, used_names: set[str]):
+        self.used_names = used_names
+        self.removed_imports: list[str] = []
+
+    def leave_ImportFrom(
+        self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom
+    ) -> Union[cst.ImportFrom, cst.RemovalSentinel]:
+        if isinstance(updated_node.names, cst.ImportStar):
+            return updated_node
+
+        new_names = []
+        for alias in updated_node.names:
+            local_name = alias.asname.name.value if alias.asname else alias.name.value
+            if local_name in self.used_names:
+                new_names.append(alias)
+            else:
+                self.removed_imports.append(local_name)
+
+        if not new_names:
+            return cst.RemovalSentinel.REMOVE
+        if len(new_names) != len(updated_node.names):
+            return updated_node.with_changes(names=new_names)
+        return updated_node
+
+    def leave_Import(
+        self, original_node: cst.Import, updated_node: cst.Import
+    ) -> Union[cst.Import, cst.RemovalSentinel]:
+        if isinstance(updated_node.names, cst.ImportStar):
+            return updated_node
+
+        new_names = []
+        for alias in updated_node.names:
+            if isinstance(alias.name, cst.Name):
+                name = alias.name.value
+            else:
+                name = _get_dotted_name_str(alias.name)
+            local_name = alias.asname.name.value if alias.asname else name.split(".")[0]
+            if local_name in self.used_names:
+                new_names.append(alias)
+            else:
+                self.removed_imports.append(local_name)
+
+        if not new_names:
+            return cst.RemovalSentinel.REMOVE
+        if len(new_names) != len(updated_node.names):
+            return updated_node.with_changes(names=new_names)
+        return updated_node
+
+
+def remove_unused_imports(source: str) -> tuple[str, list[str]]:
+    """
+    Remove imports that are not referenced in the code.
+
+    Returns:
+        Tuple of (modified_source, list of removed import names)
+    """
+    try:
+        tree = cst.parse_module(source)
+    except cst.ParserSyntaxError:
+        return source, []
+
+    # Collect all names used in the code (excluding imports)
+    used_collector = UsedNamesCollector()
+    wrapper = MetadataWrapper(tree)
+    wrapper.visit(used_collector)
+
+    # Remove unused imports
+    remover = UnusedImportRemover(used_collector.names)
+    new_tree = tree.visit(remover)
+
+    return new_tree.code, remover.removed_imports
+
+
+def ensure_imports(
+    source: str,
+    imports: list[tuple[str, str, Optional[str], bool]],
+) -> str:
+    """
+    Add imports to source if not already present.
+
+    Args:
+        source: The source code
+        imports: List of (module, name, alias, is_from_import) tuples
+
+    Returns:
+        Modified source code with imports added
+    """
+    try:
+        tree = cst.parse_module(source)
+    except cst.ParserSyntaxError:
+        # Fallback: just prepend imports
+        lines = []
+        for module, name, alias, is_from in imports:
+            if is_from:
+                line = f"from {module} import {name}"
+                if alias:
+                    line += f" as {alias}"
+            else:
+                line = f"import {module}"
+                if alias:
+                    line += f" as {alias}"
+            lines.append(line)
+        return "\n".join(lines) + "\n" + source
+
+    # Collect existing imports
+    existing_collector = ImportedNamesCollector()
+    wrapper = MetadataWrapper(tree)
+    wrapper.visit(existing_collector)
+
+    # Filter out imports that already exist
+    imports_to_add = []
+    for module, name, alias, is_from in imports:
+        local_name = alias if alias else (name if is_from else module.split(".")[0])
+        if local_name not in existing_collector.imports:
+            imports_to_add.append((module, name, alias, is_from))
+
+    if not imports_to_add:
+        return source
+
+    # Add each import
+    result = source
+    for module, name, alias, is_from in imports_to_add:
+        if is_from:
+            result = add_import(result, module, name, alias)
+        else:
+            # For 'import x' style, use a different approach
+            result = _add_plain_import(result, module, alias)
+
+    return result
+
+
+def _add_plain_import(source: str, module: str, alias: Optional[str] = None) -> str:
+    """Add a plain 'import x' or 'import x as y' statement."""
+    try:
+        tree = cst.parse_module(source)
+    except cst.ParserSyntaxError:
+        import_line = f"import {module}" + (f" as {alias}" if alias else "")
+        return import_line + "\n" + source
+
+    # Create the import alias
+    import_alias = cst.ImportAlias(
+        name=_make_dotted_name(module),
+        asname=cst.AsName(
+            whitespace_before_as=cst.SimpleWhitespace(" "),
+            whitespace_after_as=cst.SimpleWhitespace(" "),
+            name=cst.Name(alias),
+        ) if alias else None,
+    )
+
+    # Create the import statement
+    import_stmt = cst.SimpleStatementLine(
+        body=[cst.Import(names=[import_alias])]
     )
 
     # Find the right place to insert (after existing imports)
