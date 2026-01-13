@@ -14,7 +14,7 @@
       "author": {
         "name": "tssweeney"
       },
-      "source": ".claude-plugin",
+      "source": "./plugins/pycastic",
       "category": "development"
     }
   ]
