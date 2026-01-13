@@ -1,0 +1,10 @@
+{
+  "name": "pycastic",
+  "description": "Python refactoring tools - rename and move symbols and files with automatic import updates",
+  "version": "0.0.1",
+  "author": {
+    "name": "tssweeney"
+  },
+  "repository": "https://github.com/tssweeney/pycastic",
+  "license": "MIT"
+}

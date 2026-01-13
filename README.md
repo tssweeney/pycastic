@@ -118,6 +118,30 @@ pycastic src/old_name.py src/new_name.py
 pycastic src/utils.py lib/
 ```
 
+## Claude Code Plugin
+
+pycastic is a shareable Claude Code plugin. Install it via:
+
+```bash
+# In Claude Code, use the /plugin command
+/plugin install github:tssweeney/pycastic
+```
+
+Or add to your project's plugin configuration.
+
+### Plugin Structure
+
+```
+pycastic/
+├── .claude-plugin/
+│   └── plugin.json              # Plugin manifest
+├── skills/
+│   └── refactoring-python/
+│       └── SKILL.md             # Auto-invoked for Python refactoring
+├── src/pycastic/                # CLI implementation
+└── ...
+```
+
 ## How It Works
 
 pycastic uses [LibCST](https://github.com/Instagram/LibCST) to parse and transform Python code while preserving formatting. When moving symbols:
