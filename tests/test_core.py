@@ -170,6 +170,75 @@ class TestErrorHandling:
             rename_symbol(simple_project, target, "new_name")
 
 
+class TestAutoCreateDestination:
+    """Tests for automatic creation of destination files/directories."""
+
+    def test_move_file_creates_destination_dir(self, tmp_path):
+        """Test that move_file creates destination directory if it doesn't exist."""
+        # Create source file
+        (tmp_path / "source.py").write_text("""
+def my_func():
+    return 42
+""")
+
+        # Move to non-existent directory
+        result = move_file(tmp_path, Path("source.py"), Path("new_pkg/subpkg"), dry_run=False)
+
+        # Verify directory was created
+        assert (tmp_path / "new_pkg" / "subpkg").exists()
+        assert (tmp_path / "new_pkg" / "subpkg" / "source.py").exists()
+
+        # Verify __init__.py files were created for package structure
+        assert (tmp_path / "new_pkg" / "__init__.py").exists()
+        assert (tmp_path / "new_pkg" / "subpkg" / "__init__.py").exists()
+
+    def test_move_symbol_creates_destination_file(self, tmp_path):
+        """Test that move_symbol creates destination file if it doesn't exist."""
+        # Create source file with a function
+        (tmp_path / "source.py").write_text("""
+def helper():
+    return 42
+
+def other():
+    return 1
+""")
+
+        target = parse_target("source.py::helper")
+        result = move_symbol(tmp_path, target, Path("new_module.py"), dry_run=False)
+
+        # Verify destination file was created
+        assert (tmp_path / "new_module.py").exists()
+
+        # Verify function was moved
+        dest_content = (tmp_path / "new_module.py").read_text()
+        assert "def helper" in dest_content
+
+        # Verify function was removed from source
+        source_content = (tmp_path / "source.py").read_text()
+        assert "def helper" not in source_content
+        assert "def other" in source_content
+
+    def test_move_symbol_creates_nested_destination(self, tmp_path):
+        """Test that move_symbol creates nested directories for destination file."""
+        # Create source file
+        (tmp_path / "source.py").write_text("""
+def my_func():
+    return 42
+""")
+
+        target = parse_target("source.py::my_func")
+        result = move_symbol(tmp_path, target, Path("pkg/subpkg/dest.py"), dry_run=False)
+
+        # Verify nested structure was created
+        assert (tmp_path / "pkg" / "subpkg" / "dest.py").exists()
+        assert (tmp_path / "pkg" / "__init__.py").exists()
+        assert (tmp_path / "pkg" / "subpkg" / "__init__.py").exists()
+
+        # Verify function was moved
+        dest_content = (tmp_path / "pkg" / "subpkg" / "dest.py").read_text()
+        assert "def my_func" in dest_content
+
+
 class TestDisambiguation:
     """Tests for symbol disambiguation."""
 

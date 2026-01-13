@@ -82,6 +82,27 @@ def _get_python_files(project_root: Path) -> list[Path]:
     return files
 
 
+def _ensure_package_init_files(directory: Path, project_root: Path) -> list[Path]:
+    """Create __init__.py files in directory and all parent directories up to project root.
+
+    This ensures the directory structure is a valid Python package.
+
+    Returns:
+        List of created __init__.py file paths
+    """
+    created = []
+    current = directory
+
+    while current != project_root and current.is_relative_to(project_root):
+        init_file = current / "__init__.py"
+        if not init_file.exists():
+            init_file.write_text('"""Package."""\n')
+            created.append(init_file)
+        current = current.parent
+
+    return created
+
+
 def rename_symbol(
     project_root: Path,
     target: TargetSpec,
@@ -234,8 +255,16 @@ def move_symbol(
 
         if not source_file.exists():
             raise RefactoringError(f"Source file not found: {source_file}")
+
+        # Create destination file if it doesn't exist
+        dest_file_created = False
         if not dest_file.exists():
-            raise RefactoringError(f"Destination file not found: {dest_file}")
+            # Create parent directories if needed
+            dest_file.parent.mkdir(parents=True, exist_ok=True)
+            _ensure_package_init_files(dest_file.parent, project_root)
+            # Create empty Python file
+            dest_file.write_text(f'"""{dest_file.stem} module."""\n')
+            dest_file_created = True
 
         # Extract the definition
         source_content = source_file.read_text()
@@ -397,8 +426,12 @@ def move_file(
 
         if not old_file.exists():
             raise RefactoringError(f"File not found: {old_file}")
+
+        # Create destination directory if it doesn't exist
         if not dest_dir.exists():
-            raise RefactoringError(f"Destination directory not found: {dest_dir}")
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            # Create __init__.py files for Python package structure
+            _ensure_package_init_files(dest_dir, project_root)
 
         # Calculate new file path
         new_file = dest_dir / old_file.name
