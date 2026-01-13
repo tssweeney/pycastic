@@ -8,14 +8,34 @@ Python refactoring CLI tool powered by LibCST.
 pip install pycastic
 ```
 
-## Commands
+## Usage
 
-| Command | Description |
+pycastic uses a unified command interface that automatically detects the operation based on source and target arguments:
+
+```bash
+pycastic SOURCE TARGET [OPTIONS]
+```
+
+The project root is auto-detected by looking for `pyproject.toml` or `.git` directory, or can be specified with `--root`.
+
+## Operations
+
+### Symbol Operations (source contains `::`)
+
+| Example | Description |
 |---------|-------------|
-| `pycastic rename ROOT TARGET NEW_NAME` | Rename a symbol across the codebase |
-| `pycastic move ROOT TARGET DEST_FILE` | Move symbol(s) to another file |
-| `pycastic rename-file ROOT FILE NEW_NAME` | Rename a file and update imports |
-| `pycastic move-file ROOT FILE DEST_DIR` | Move a file and update imports |
+| `pycastic src/utils.py::old_func src/utils.py::new_func` | Rename symbol |
+| `pycastic src/utils.py::helper dest.py` | Move symbol |
+| `pycastic src/utils.py::helper dest.py::new_name` | Move + rename |
+| `pycastic src/utils.py::a,b,c dest.py` | Move multiple symbols |
+
+### File Operations (source is a file path)
+
+| Example | Description |
+|---------|-------------|
+| `pycastic src/old.py src/new.py` | Rename file |
+| `pycastic src/utils.py lib/utils.py` | Move file |
+| `pycastic src/utils.py lib/` | Move file to directory |
 
 ## Target Formats
 
@@ -25,11 +45,12 @@ pip install pycastic
 | `file.py::A,B,C` | `utils.py::foo,bar` | Multiple symbols |
 | `file.py:line:col` | `utils.py:10:5` | Symbol at position |
 
-## Move Command Options
+## Options
 
 | Option | Effect |
 |--------|--------|
 | `--dry-run` / `-n` | Preview changes without applying |
+| `--root PATH` / `-r` | Specify project root (auto-detected by default) |
 | `--include-deps` | Auto-include shared dependencies in the move |
 | `--shared-file` | Extract shared deps to default file (`{source}_common.py`) |
 | `--shared-file-path PATH` | Extract shared deps to specified file |
@@ -51,23 +72,23 @@ pip install pycastic
 
 ```bash
 # Rename by name
-pycastic rename . src/utils.py::old_function new_function
+pycastic src/utils.py::old_function src/utils.py::new_function
 
 # Rename by position (line:column)
-pycastic rename /path/to/project src/module.py:10:5 new_name
+pycastic src/module.py:10:5 src/module.py::new_name
 ```
 
 ### Move symbols
 
 ```bash
 # Move a function (auto-includes unused internal dependencies)
-pycastic move . src/utils.py::process_data src/processors.py
+pycastic src/utils.py::process_data src/processors.py
 
 # Move multiple related functions together
-pycastic move . src/utils.py::parse,validate,transform src/parsers.py
+pycastic src/utils.py::parse,validate,transform src/parsers.py
 
 # Preview what would happen
-pycastic move . src/utils.py::my_func dest.py --dry-run
+pycastic src/utils.py::my_func dest.py --dry-run
 ```
 
 ### Handling shared dependencies
@@ -78,23 +99,23 @@ When moving a symbol that depends on another symbol in the same file, pycastic c
 # If shared dependency detected, you have two options:
 
 # Option 1: Include shared deps in the move
-pycastic move . src/utils.py::func_a dest.py --include-deps
+pycastic src/utils.py::func_a dest.py --include-deps
 
 # Option 2: Extract shared deps to a common file (default: utils_common.py)
-pycastic move . src/utils.py::func_a dest.py --shared-file
+pycastic src/utils.py::func_a dest.py --shared-file
 
 # Option 3: Extract shared deps to a specific file
-pycastic move . src/utils.py::func_a dest.py --shared-file-path src/common.py
+pycastic src/utils.py::func_a dest.py --shared-file-path src/common.py
 ```
 
 ### Rename and move files
 
 ```bash
 # Rename a file (updates all imports)
-pycastic rename-file . src/old_name.py new_name
+pycastic src/old_name.py src/new_name.py
 
 # Move a file to a new directory (updates all imports)
-pycastic move-file . src/utils.py src/lib/
+pycastic src/utils.py lib/
 ```
 
 ## How It Works

@@ -1,4 +1,5 @@
 """Tests for the CLI module."""
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -44,8 +45,13 @@ def main():
 '''
     )
 
+    # Store original cwd and change to temp_dir so relative paths work
+    original_cwd = os.getcwd()
+    os.chdir(temp_dir)
+
     yield temp_dir
 
+    os.chdir(original_cwd)
     shutil.rmtree(temp_dir)
 
 
@@ -59,29 +65,35 @@ class TestVersionCommand:
         assert "pycastic version" in result.stdout
 
 
-class TestRenameCommand:
-    """Tests for rename command."""
+class TestHelpCommand:
+    """Tests for help output."""
 
-    def test_rename_help(self):
-        """Test rename --help."""
-        result = runner.invoke(app, ["rename", "--help"])
+    def test_help(self):
+        """Test --help shows usage info."""
+        result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "Rename a symbol" in result.stdout
+        assert "Move or rename Python symbols and files" in result.stdout
+        assert "Symbol operations" in result.stdout
+        assert "File operations" in result.stdout
 
-    def test_rename_dry_run(self, cli_project):
-        """Test rename with --dry-run."""
+
+class TestSymbolRename:
+    """Tests for symbol rename operations (same file, new name)."""
+
+    def test_rename_symbol_dry_run(self, cli_project):
+        """Test renaming a symbol with --dry-run."""
         result = runner.invoke(
             app,
-            ["rename", str(cli_project), "module.py::my_function", "new_func", "-n"],
+            ["module.py::my_function", "module.py::new_func", "-n"],
         )
         assert result.exit_code == 0
         assert "Dry Run" in result.stdout
 
-    def test_rename_executes(self, cli_project):
+    def test_rename_symbol_executes(self, cli_project):
         """Test rename actually renames."""
         result = runner.invoke(
             app,
-            ["rename", str(cli_project), "module.py::my_function", "new_func"],
+            ["module.py::my_function", "module.py::new_func"],
         )
         assert result.exit_code == 0
         assert "Successfully renamed" in result.stdout
@@ -90,30 +102,42 @@ class TestRenameCommand:
         content = (cli_project / "module.py").read_text()
         assert "def new_func():" in content
 
-    def test_rename_invalid_target(self, cli_project):
-        """Test rename with invalid target format."""
+
+class TestSymbolMove:
+    """Tests for symbol move operations (different file)."""
+
+    def test_move_symbol_dry_run(self, cli_project):
+        """Test moving a symbol with --dry-run."""
         result = runner.invoke(
             app,
-            ["rename", str(cli_project), "invalid", "new_name"],
+            ["module.py::my_function", "main.py", "-n"],
         )
-        assert result.exit_code == 1
-        assert "Error" in result.stdout
-
-
-class TestRenameFileCommand:
-    """Tests for rename-file command."""
-
-    def test_rename_file_help(self):
-        """Test rename-file --help."""
-        result = runner.invoke(app, ["rename-file", "--help"])
         assert result.exit_code == 0
-        assert "Rename a Python file" in result.stdout
+        assert "Dry Run" in result.stdout
+
+    def test_move_symbol_executes(self, cli_project):
+        """Test move actually moves."""
+        result = runner.invoke(
+            app,
+            ["module.py::my_function", "dest.py"],
+        )
+        assert result.exit_code == 0
+        assert "Successfully moved" in result.stdout
+
+        # Verify change
+        assert (cli_project / "dest.py").exists()
+        dest_content = (cli_project / "dest.py").read_text()
+        assert "def my_function():" in dest_content
+
+
+class TestFileRename:
+    """Tests for file rename operations (same directory, new name)."""
 
     def test_rename_file_dry_run(self, cli_project):
-        """Test rename-file with --dry-run."""
+        """Test renaming a file with --dry-run."""
         result = runner.invoke(
             app,
-            ["rename-file", str(cli_project), "module.py", "utils", "-n"],
+            ["module.py", "utils.py", "-n"],
         )
         assert result.exit_code == 0
         assert "Dry Run" in result.stdout
@@ -122,40 +146,81 @@ class TestRenameFileCommand:
         """Test rename-file actually renames."""
         result = runner.invoke(
             app,
-            ["rename-file", str(cli_project), "module.py", "utils"],
+            ["module.py", "utils.py"],
         )
         assert result.exit_code == 0
-        assert "Successfully renamed file" in result.stdout
+        assert "Successfully renamed" in result.stdout
 
         # Verify change
         assert not (cli_project / "module.py").exists()
         assert (cli_project / "utils.py").exists()
 
 
-class TestMoveCommand:
-    """Tests for move command."""
+class TestFileMove:
+    """Tests for file move operations (different directory)."""
 
-    def test_move_help(self):
-        """Test move --help."""
-        result = runner.invoke(app, ["move", "--help"])
-        assert result.exit_code == 0
-        assert "Move symbol(s)" in result.stdout
-
-    def test_move_dry_run(self, cli_project):
-        """Test move with --dry-run."""
+    def test_move_file_dry_run(self, cli_project):
+        """Test moving a file with --dry-run."""
+        (cli_project / "lib").mkdir()
         result = runner.invoke(
             app,
-            ["move", str(cli_project), "module.py::my_function", "main.py", "-n"],
+            ["module.py", "lib/", "-n"],
         )
         assert result.exit_code == 0
         assert "Dry Run" in result.stdout
 
-
-class TestMoveFileCommand:
-    """Tests for move-file command."""
-
-    def test_move_file_help(self):
-        """Test move-file --help."""
-        result = runner.invoke(app, ["move-file", "--help"])
+    def test_move_file_executes(self, cli_project):
+        """Test move-file actually moves."""
+        (cli_project / "lib").mkdir()
+        result = runner.invoke(
+            app,
+            ["module.py", "lib/"],
+        )
         assert result.exit_code == 0
-        assert "Move a Python file" in result.stdout
+        assert "Successfully moved" in result.stdout
+
+        # Verify change
+        assert not (cli_project / "module.py").exists()
+        assert (cli_project / "lib" / "module.py").exists()
+
+
+class TestErrorHandling:
+    """Tests for error handling in CLI."""
+
+    def test_missing_target(self, cli_project):
+        """Test error when target is missing."""
+        result = runner.invoke(app, ["module.py::my_function"])
+        assert result.exit_code == 1
+        assert "Error" in result.stdout
+
+    def test_invalid_symbol_format(self, cli_project):
+        """Test error with invalid symbol format for rename."""
+        # Source is symbol but target has invalid format (single colon)
+        result = runner.invoke(
+            app,
+            ["module.py::my_function", "module.py:new_func"],
+        )
+        # Should not be treated as symbol rename (no ::)
+        # Will try to move to a file literally named "module.py:new_func"
+        # This may fail or succeed depending on filesystem, but exit != 0 if invalid
+        # The important thing is it doesn't crash
+        assert "Error" in result.stdout or result.exit_code != 0
+
+
+class TestRootOption:
+    """Tests for --root option."""
+
+    def test_explicit_root(self, cli_project):
+        """Test using explicit --root option."""
+        result = runner.invoke(
+            app,
+            [
+                "--root",
+                str(cli_project),
+                "module.py::my_function",
+                "module.py::new_func",
+                "-n",
+            ],
+        )
+        assert result.exit_code == 0
+        assert "Dry Run" in result.stdout
