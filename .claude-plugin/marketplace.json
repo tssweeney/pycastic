@@ -14,7 +14,7 @@
       "author": {
         "name": "tssweeney"
       },
-      "source": ".",
+      "source": ".claude-plugin",
       "category": "development"
     }
   ]
