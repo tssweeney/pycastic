@@ -1,5 +1,5 @@
 """
-CLI interface for pyfactor using typer.
+CLI interface for pycastic using typer.
 """
 from pathlib import Path
 from typing import Annotated, Optional
@@ -10,11 +10,11 @@ from rich.panel import Panel
 
 from . import __version__
 from .core import move_file, move_symbol, rename_file, rename_symbol
-from .errors import AmbiguousSymbolError, CircularDependencyError, PyfactorError
+from .errors import AmbiguousSymbolError, CircularDependencyError, PycasticError
 from .parsing import parse_target
 
 app = typer.Typer(
-    name="pyfactor",
+    name="pycastic",
     help="Python refactoring CLI tool powered by LibCST.",
     add_completion=False,
 )
@@ -23,7 +23,7 @@ console = Console()
 
 def version_callback(value: bool):
     if value:
-        console.print(f"pyfactor version {__version__}")
+        console.print(f"pycastic version {__version__}")
         raise typer.Exit()
 
 
@@ -81,8 +81,8 @@ def rename(
     Rename a symbol (class, function, variable) across the codebase.
 
     Examples:
-        pyfactor rename . src/utils.py::old_function new_function
-        pyfactor rename /path/to/project src/module.py:10:5 new_name
+        pycastic rename . src/utils.py::old_function new_function
+        pycastic rename /path/to/project src/module.py:10:5 new_name
     """
     try:
         parsed_target = parse_target(target)
@@ -110,7 +110,7 @@ def rename(
     except AmbiguousSymbolError as e:
         console.print(f"[yellow]Ambiguous symbol:[/yellow] {e}")
         raise typer.Exit(code=1)
-    except PyfactorError as e:
+    except PycasticError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
 
@@ -178,11 +178,11 @@ def move(
     - Shared deps (used by moved AND remaining code) require --include-deps or --shared-file
 
     Examples:
-        pyfactor move . src/utils.py::helper src/helpers.py
-        pyfactor move . src/utils.py::func1,func2 src/funcs.py
-        pyfactor move . src/utils.py::my_func dest.py --include-deps
-        pyfactor move . src/utils.py::my_func dest.py --shared-file
-        pyfactor move . src/utils.py::my_func dest.py --shared-file-path src/common.py
+        pycastic move . src/utils.py::helper src/helpers.py
+        pycastic move . src/utils.py::func1,func2 src/funcs.py
+        pycastic move . src/utils.py::my_func dest.py --include-deps
+        pycastic move . src/utils.py::my_func dest.py --shared-file
+        pycastic move . src/utils.py::my_func dest.py --shared-file-path src/common.py
     """
     try:
         parsed_target = parse_target(target)
@@ -230,7 +230,7 @@ def move(
     except CircularDependencyError as e:
         console.print(f"[yellow]Shared dependency conflict:[/yellow]\n{e}")
         raise typer.Exit(code=1)
-    except PyfactorError as e:
+    except PycasticError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
 
@@ -272,8 +272,8 @@ def rename_file_cmd(
     Rename a Python file and update all imports.
 
     Examples:
-        pyfactor rename-file . src/old_name.py new_name
-        pyfactor rename-file /path/to/project lib/utils.py helpers
+        pycastic rename-file . src/old_name.py new_name
+        pycastic rename-file /path/to/project lib/utils.py helpers
     """
     try:
         changed_files = rename_file(project_root, file, new_name, dry_run)
@@ -293,7 +293,7 @@ def rename_file_cmd(
             for f in changed_files:
                 console.print(f"  - {f}")
 
-    except PyfactorError as e:
+    except PycasticError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
 
@@ -335,8 +335,8 @@ def move_file_cmd(
     Move a Python file to a new location and update all imports.
 
     Examples:
-        pyfactor move-file . src/utils.py src/lib/
-        pyfactor move-file /path/to/project old/module.py new/subdir/
+        pycastic move-file . src/utils.py src/lib/
+        pycastic move-file /path/to/project old/module.py new/subdir/
     """
     try:
         changed_files = move_file(project_root, file, destination_dir, dry_run)
@@ -356,7 +356,7 @@ def move_file_cmd(
             for f in changed_files:
                 console.print(f"  - {f}")
 
-    except PyfactorError as e:
+    except PycasticError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)
 

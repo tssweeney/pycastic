@@ -1,4 +1,4 @@
-"""Pytest fixtures for pyfactor tests."""
+"""Pytest fixtures for pycastic tests."""
 import shutil
 import tempfile
 from pathlib import Path

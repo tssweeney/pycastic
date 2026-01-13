@@ -1,1 +1,1 @@
-"""Tests for pyfactor."""
+"""Tests for pycastic."""

@@ -1,5 +1,5 @@
 [project]
-name = "pyfactor"
+name = "pycastic"
 version = "0.2.0"
 description = "Python refactoring CLI tool powered by LibCST"
 readme = "README.md"
@@ -14,11 +14,11 @@ dependencies = [
 dev = ["pytest>=8.0.0"]
 
 [project.scripts]
-pyfactor = "pyfactor.cli:app"
+pycastic = "pycastic.cli:app"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pyfactor"]
+packages = ["src/pycastic"]

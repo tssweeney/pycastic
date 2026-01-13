@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from pyfactor.cli import app
+from pycastic.cli import app
 
 runner = CliRunner()
 
@@ -56,7 +56,7 @@ class TestVersionCommand:
         """Test --version shows version."""
         result = runner.invoke(app, ["--version"])
         assert result.exit_code == 0
-        assert "pyfactor version" in result.stdout
+        assert "pycastic version" in result.stdout
 
 
 class TestRenameCommand:

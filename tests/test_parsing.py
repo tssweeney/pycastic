@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from pyfactor.errors import SymbolNotFoundError, TargetParseError
-from pyfactor.parsing import (
+from pycastic.errors import SymbolNotFoundError, TargetParseError
+from pycastic.parsing import (
     NAME_PATTERN,
     POSITION_PATTERN,
     SymbolByName,

@@ -1,27 +1,27 @@
 """
-Custom exceptions for pyfactor.
+Custom exceptions for pycastic.
 """
 
 
-class PyfactorError(Exception):
-    """Base exception for pyfactor errors."""
+class PycasticError(Exception):
+    """Base exception for pycastic errors."""
 
     pass
 
 
-class TargetParseError(PyfactorError):
+class TargetParseError(PycasticError):
     """Error parsing target specification."""
 
     pass
 
 
-class SymbolNotFoundError(PyfactorError):
+class SymbolNotFoundError(PycasticError):
     """Symbol could not be found in the specified file."""
 
     pass
 
 
-class AmbiguousSymbolError(PyfactorError):
+class AmbiguousSymbolError(PycasticError):
     """Multiple symbols with the same name exist.
 
     This error includes information about all matching symbols
@@ -33,13 +33,13 @@ class AmbiguousSymbolError(PyfactorError):
         self.matches = matches or []
 
 
-class RefactoringError(PyfactorError):
+class RefactoringError(PycasticError):
     """Error during refactoring operation."""
 
     pass
 
 
-class CircularDependencyError(PyfactorError):
+class CircularDependencyError(PycasticError):
     """Raised when moving a symbol would create a circular import.
 
     This occurs when a symbol depends on another symbol in the same file
@@ -51,7 +51,7 @@ class CircularDependencyError(PyfactorError):
         self.shared_symbols = shared_symbols or []
 
 
-class ProjectError(PyfactorError):
+class ProjectError(PycasticError):
     """Error with project configuration or access."""
 
     pass

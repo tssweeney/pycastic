@@ -129,7 +129,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pyfactor"
+name = "pycastic"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

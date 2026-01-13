@@ -1,21 +1,21 @@
-# pyfactor
+# pycastic
 
 Python refactoring CLI tool powered by LibCST.
 
 ## Installation
 
 ```bash
-pip install pyfactor
+pip install pycastic
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `pyfactor rename ROOT TARGET NEW_NAME` | Rename a symbol across the codebase |
-| `pyfactor move ROOT TARGET DEST_FILE` | Move symbol(s) to another file |
-| `pyfactor rename-file ROOT FILE NEW_NAME` | Rename a file and update imports |
-| `pyfactor move-file ROOT FILE DEST_DIR` | Move a file and update imports |
+| `pycastic rename ROOT TARGET NEW_NAME` | Rename a symbol across the codebase |
+| `pycastic move ROOT TARGET DEST_FILE` | Move symbol(s) to another file |
+| `pycastic rename-file ROOT FILE NEW_NAME` | Rename a file and update imports |
+| `pycastic move-file ROOT FILE DEST_DIR` | Move a file and update imports |
 
 ## Target Formats
 
@@ -51,55 +51,55 @@ pip install pyfactor
 
 ```bash
 # Rename by name
-pyfactor rename . src/utils.py::old_function new_function
+pycastic rename . src/utils.py::old_function new_function
 
 # Rename by position (line:column)
-pyfactor rename /path/to/project src/module.py:10:5 new_name
+pycastic rename /path/to/project src/module.py:10:5 new_name
 ```
 
 ### Move symbols
 
 ```bash
 # Move a function (auto-includes unused internal dependencies)
-pyfactor move . src/utils.py::process_data src/processors.py
+pycastic move . src/utils.py::process_data src/processors.py
 
 # Move multiple related functions together
-pyfactor move . src/utils.py::parse,validate,transform src/parsers.py
+pycastic move . src/utils.py::parse,validate,transform src/parsers.py
 
 # Preview what would happen
-pyfactor move . src/utils.py::my_func dest.py --dry-run
+pycastic move . src/utils.py::my_func dest.py --dry-run
 ```
 
 ### Handling shared dependencies
 
-When moving a symbol that depends on another symbol in the same file, pyfactor checks if that dependency is used by other remaining code:
+When moving a symbol that depends on another symbol in the same file, pycastic checks if that dependency is used by other remaining code:
 
 ```bash
 # If shared dependency detected, you have two options:
 
 # Option 1: Include shared deps in the move
-pyfactor move . src/utils.py::func_a dest.py --include-deps
+pycastic move . src/utils.py::func_a dest.py --include-deps
 
 # Option 2: Extract shared deps to a common file (default: utils_common.py)
-pyfactor move . src/utils.py::func_a dest.py --shared-file
+pycastic move . src/utils.py::func_a dest.py --shared-file
 
 # Option 3: Extract shared deps to a specific file
-pyfactor move . src/utils.py::func_a dest.py --shared-file-path src/common.py
+pycastic move . src/utils.py::func_a dest.py --shared-file-path src/common.py
 ```
 
 ### Rename and move files
 
 ```bash
 # Rename a file (updates all imports)
-pyfactor rename-file . src/old_name.py new_name
+pycastic rename-file . src/old_name.py new_name
 
 # Move a file to a new directory (updates all imports)
-pyfactor move-file . src/utils.py src/lib/
+pycastic move-file . src/utils.py src/lib/
 ```
 
 ## How It Works
 
-pyfactor uses [LibCST](https://github.com/Instagram/LibCST) to parse and transform Python code while preserving formatting. When moving symbols:
+pycastic uses [LibCST](https://github.com/Instagram/LibCST) to parse and transform Python code while preserving formatting. When moving symbols:
 
 1. **Dependency Analysis**: Analyzes what imports and internal symbols the target depends on
 2. **Smart Resolution**: Determines which dependencies should move automatically vs. require user input

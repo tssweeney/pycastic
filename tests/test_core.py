@@ -3,14 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from pyfactor.core import (
+from pycastic.core import (
     move_file,
     move_symbol,
     rename_file,
     rename_symbol,
 )
-from pyfactor.errors import RefactoringError, SymbolNotFoundError
-from pyfactor.parsing import parse_target
+from pycastic.errors import RefactoringError, SymbolNotFoundError
+from pycastic.parsing import parse_target
 
 
 class TestRenameSymbol:
@@ -244,7 +244,7 @@ class TestDisambiguation:
 
     def test_multiple_definitions_same_file_raises_error(self, tmp_path):
         """Test that multiple definitions of same name in same file raises AmbiguousSymbolError."""
-        from pyfactor.errors import AmbiguousSymbolError
+        from pycastic.errors import AmbiguousSymbolError
 
         # Create a file with two functions of the same name (in nested scopes)
         # This is a contrived example - in reality, you'd have module-level duplicates
@@ -371,7 +371,7 @@ def other_func():
 
     def test_move_raises_on_shared_internal_deps(self, tmp_path):
         """Shared internal dependencies raise CircularDependencyError."""
-        from pyfactor.errors import CircularDependencyError
+        from pycastic.errors import CircularDependencyError
 
         # Create source file where shared_helper is used by both func_a and func_b
         (tmp_path / "utils.py").write_text('''"""Utils module."""

@@ -1,5 +1,5 @@
 """
-pyfactor - Python refactoring CLI tool powered by LibCST.
+pycastic - Python refactoring CLI tool powered by LibCST.
 """
 
 __version__ = "0.2.0"
