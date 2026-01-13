@@ -223,8 +223,17 @@ def _get_dotted_name_str(node: Union[cst.Name, cst.Attribute]) -> str:
 
 
 def _make_dotted_name(name: str) -> Union[cst.Name, cst.Attribute]:
-    """Create a Name or Attribute node from a dotted string."""
-    parts = name.split(".")
+    """Create a Name or Attribute node from a dotted string.
+
+    Note: This does NOT handle relative imports (strings starting with dots).
+    For relative imports, use _parse_relative_module() instead.
+    """
+    # Filter out empty parts (from leading/trailing dots or double dots)
+    parts = [p for p in name.split(".") if p]
+
+    if not parts:
+        raise ValueError(f"Cannot create dotted name from empty or dot-only string: {name!r}")
+
     if len(parts) == 1:
         return cst.Name(parts[0])
 
@@ -232,6 +241,39 @@ def _make_dotted_name(name: str) -> Union[cst.Name, cst.Attribute]:
     for part in parts[1:]:
         result = cst.Attribute(value=result, attr=cst.Name(part))
     return result
+
+
+def _parse_relative_module(module: str) -> tuple[list[cst.Dot], Optional[Union[cst.Name, cst.Attribute]]]:
+    """Parse a module string that may contain relative import dots.
+
+    Args:
+        module: Module string like ".", "..", ".foo", "..foo.bar", or "foo.bar"
+
+    Returns:
+        Tuple of (relative_dots, module_node) where:
+        - relative_dots is a list of cst.Dot for relative imports
+        - module_node is the module name (None for pure relative like ".")
+    """
+    # Count leading dots
+    dot_count = 0
+    for char in module:
+        if char == ".":
+            dot_count += 1
+        else:
+            break
+
+    # Create relative dots
+    relative = [cst.Dot() for _ in range(dot_count)]
+
+    # Get the module part after the dots
+    module_part = module[dot_count:]
+
+    if module_part:
+        module_node = _make_dotted_name(module_part)
+    else:
+        module_node = None
+
+    return relative, module_node
 
 
 def rename_in_source(source: str, old_name: str, new_name: str) -> tuple[str, int]:
@@ -407,7 +449,11 @@ def add_definition(source: str, definition_code: str) -> str:
 
 
 def add_import(source: str, module: str, name: str, alias: Optional[str] = None) -> str:
-    """Add an import statement to source code."""
+    """Add an import statement to source code.
+
+    Handles both absolute imports (from foo.bar import x) and
+    relative imports (from . import x, from ..foo import x).
+    """
     try:
         tree = cst.parse_module(source)
     except cst.ParserSyntaxError:
@@ -420,11 +466,15 @@ def add_import(source: str, module: str, name: str, alias: Optional[str] = None)
         asname=cst.AsName(whitespace_before_as=cst.SimpleWhitespace(" "), whitespace_after_as=cst.SimpleWhitespace(" "), name=cst.Name(alias)) if alias else None,
     )
 
+    # Parse the module, handling relative imports
+    relative, module_node = _parse_relative_module(module)
+
     # Create the import statement
     import_stmt = cst.SimpleStatementLine(
         body=[
             cst.ImportFrom(
-                module=_make_dotted_name(module),
+                relative=relative,
+                module=module_node,
                 names=[import_alias],
                 whitespace_after_from=cst.SimpleWhitespace(" "),
                 whitespace_before_import=cst.SimpleWhitespace(" "),
