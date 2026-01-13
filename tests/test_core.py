@@ -369,10 +369,8 @@ def other_func():
         assert "def internal_helper" not in source_content
         assert "def other_func" in source_content  # This should remain
 
-    def test_move_raises_on_shared_internal_deps(self, tmp_path):
-        """Shared internal dependencies raise CircularDependencyError."""
-        from pycastic.errors import CircularDependencyError
-
+    def test_move_auto_extracts_shared_deps_to_common_file(self, tmp_path):
+        """Shared internal dependencies are auto-extracted to a common file."""
         # Create source file where shared_helper is used by both func_a and func_b
         (tmp_path / "utils.py").write_text('''"""Utils module."""
 
@@ -389,12 +387,28 @@ def func_b():
     return shared_helper() + 2
 ''')
 
-        # Try to move func_a - should fail because shared_helper is used by func_b too
+        # Move func_a - shared_helper should be auto-extracted to utils_common.py
         target = parse_target("utils.py::func_a")
-        with pytest.raises(CircularDependencyError) as exc_info:
-            move_symbol(tmp_path, target, Path("dest.py"), dry_run=False)
+        result, info = move_symbol(tmp_path, target, Path("dest.py"), dry_run=False)
 
-        assert "shared_helper" in str(exc_info.value)
+        # Check info message mentions auto-extraction
+        assert any("Auto-extracting" in msg for msg in info)
+        assert any("shared_helper" in msg for msg in info)
+
+        # func_a should be in dest.py
+        dest_content = (tmp_path / "dest.py").read_text()
+        assert "def func_a" in dest_content
+        assert "from utils_common import shared_helper" in dest_content
+
+        # shared_helper should be in utils_common.py
+        assert (tmp_path / "utils_common.py").exists()
+        common_content = (tmp_path / "utils_common.py").read_text()
+        assert "def shared_helper" in common_content
+
+        # func_b should still be in utils.py, importing from common
+        source_content = (tmp_path / "utils.py").read_text()
+        assert "def func_b" in source_content
+        assert "from utils_common import shared_helper" in source_content
 
     def test_move_with_include_deps_flag(self, tmp_path):
         """--include-deps moves shared dependencies anyway."""

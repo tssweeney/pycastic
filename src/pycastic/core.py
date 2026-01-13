@@ -287,18 +287,15 @@ def move_symbol(
             source_file, initial_symbols, include_shared_deps=include_deps
         )
 
-        # Handle shared dependencies
+        # Handle shared dependencies - use shared_file by default
         if shared_deps and not include_deps and not shared_file:
-            # Default shared file path
+            # Auto-generate default shared file path
             default_shared = source_file.parent / f"{source_file.stem}_common.py"
-            rel_default = default_shared.relative_to(project_root)
-            raise CircularDependencyError(
-                f"The following symbols are used by both moved and remaining code:\n"
-                f"  {', '.join(shared_deps)}\n\n"
-                f"Options:\n"
-                f"  --include-deps    Include these symbols in the move\n"
-                f"  --shared-file     Extract to a common file (default: {rel_default})",
-                shared_symbols=shared_deps
+            shared_file = default_shared.relative_to(project_root)
+            info_messages.append(
+                f"Auto-extracting shared dependencies to: {shared_file}\n"
+                f"  Shared symbols: {', '.join(shared_deps)}\n"
+                f"  Use --include-deps to move them instead"
             )
 
         # Log what we're moving
