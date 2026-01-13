@@ -78,11 +78,6 @@ jobs:
           echo "version=$new_version" >> $GITHUB_OUTPUT
           echo "tag=v$new_version" >> $GITHUB_OUTPUT
 
-      - name: Update version in pyproject.toml
-        run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.new.outputs.version }}"/' pyproject.toml
-          cat pyproject.toml | grep version
-
       - name: Update version in __init__.py
         run: |
           sed -i 's/__version__ = ".*"/__version__ = "${{ steps.new.outputs.version }}"/' src/pycastic/__init__.py

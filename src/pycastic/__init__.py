@@ -2,7 +2,7 @@
 pycastic - Python refactoring CLI tool powered by LibCST.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.0.1"
 
 from .cli import app
 
