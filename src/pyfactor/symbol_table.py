@@ -312,6 +312,14 @@ class SymbolTable:
                 return defn
         return None
 
+    def find_all_definitions_by_name(self, name: str) -> list[SymbolDefinition]:
+        """Find all definitions of a symbol across the project.
+
+        Returns a list of all definitions with the given name, useful for
+        disambiguation when multiple symbols have the same name.
+        """
+        return self.definitions_by_name.get(name, [])
+
     def find_definition_at(self, file_path: Path, line: int, column: int) -> Optional[SymbolDefinition]:
         """Find a symbol definition at a specific location."""
         if file_path not in self.files:

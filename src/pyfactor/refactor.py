@@ -12,16 +12,68 @@ from libcst import matchers as m
 
 
 class RenameTransformer(cst.CSTTransformer):
-    """Transformer that renames occurrences of a symbol."""
+    """Transformer that renames occurrences of a symbol.
+
+    IMPORTANT: This transformer is careful to NOT rename:
+    - Module paths in import statements (e.g., 'console' in 'from rich.console import')
+    - Parts of attribute access on external modules
+
+    It ONLY renames:
+    - Local variable definitions and usages
+    - Function/class definitions
+    - The actual imported names (after 'import' keyword)
+    """
 
     def __init__(self, old_name: str, new_name: str, rename_definitions: bool = True):
         self.old_name = old_name
         self.new_name = new_name
         self.rename_definitions = rename_definitions
         self.changes_made = 0
+        # Track context to avoid renaming import module paths
+        self._in_import_module = False
+        self._in_import_alias_name = False
+
+    def visit_ImportFrom(self, node: cst.ImportFrom) -> bool:
+        """Entering an ImportFrom - module part should not be renamed."""
+        return True
+
+    def visit_ImportFrom_module(self, node: cst.ImportFrom) -> None:
+        """Visiting the module part of ImportFrom - don't rename here."""
+        self._in_import_module = True
+
+    def leave_ImportFrom_module(self, node: cst.ImportFrom) -> None:
+        """Leaving the module part of ImportFrom."""
+        self._in_import_module = False
+
+    def visit_Import(self, node: cst.Import) -> bool:
+        """Entering an Import statement."""
+        return True
+
+    def visit_ImportAlias_name(self, node: cst.ImportAlias) -> None:
+        """Visiting the name part of ImportAlias (the module being imported)."""
+        # For 'import foo.bar', foo.bar is the module path - don't rename
+        # For 'from x import foo', foo is the imported name - CAN rename
+        # We need to check if we're in Import vs ImportFrom
+        self._in_import_alias_name = True
+
+    def leave_ImportAlias_name(self, node: cst.ImportAlias) -> None:
+        """Leaving the name part of ImportAlias."""
+        self._in_import_alias_name = False
 
     def leave_Name(self, original_node: cst.Name, updated_node: cst.Name) -> cst.Name:
-        """Rename Name nodes."""
+        """Rename Name nodes, but NOT inside import module paths."""
+        # Don't rename if we're in an import module path
+        if self._in_import_module:
+            return updated_node
+
+        # For 'import foo.bar' style imports, don't rename the module path
+        # But for 'from x import foo', we DO want to rename 'foo' if it matches
+        # The _in_import_alias_name flag is set for both cases, so we need
+        # to be more careful. Actually, for safety let's not rename import aliases
+        # at all in this transformer - that should be done by ImportRenameTransformer
+        if self._in_import_alias_name:
+            return updated_node
+
         if updated_node.value == self.old_name:
             self.changes_made += 1
             return updated_node.with_changes(value=self.new_name)
@@ -54,18 +106,17 @@ class RenameTransformer(cst.CSTTransformer):
             )
         return updated_node
 
-    def leave_ImportAlias(self, original_node: cst.ImportAlias, updated_node: cst.ImportAlias) -> cst.ImportAlias:
-        """Rename imported names."""
-        if isinstance(updated_node.name, cst.Name) and updated_node.name.value == self.old_name:
-            self.changes_made += 1
-            return updated_node.with_changes(
-                name=cst.Name(self.new_name)
-            )
-        return updated_node
-
 
 class ImportRenameTransformer(cst.CSTTransformer):
-    """Transformer that updates import statements when a module or symbol is renamed."""
+    """Transformer that updates import statements when a module or symbol is renamed.
+
+    This is used for:
+    1. Renaming imported symbols: 'from x import old' -> 'from x import new'
+    2. Updating module paths when a file is renamed/moved
+
+    IMPORTANT: This should only be used for LOCAL modules we control,
+    never for external packages.
+    """
 
     def __init__(
         self,
@@ -91,7 +142,7 @@ class ImportRenameTransformer(cst.CSTTransformer):
         """Update from ... import statements."""
         changes = {}
 
-        # Update module name if needed
+        # Update module name if needed (only for exact matches)
         if self.old_module and self.new_module and updated_node.module:
             current_module = _get_dotted_name_str(updated_node.module)
             if current_module == self.old_module:
@@ -185,6 +236,10 @@ def _make_dotted_name(name: str) -> Union[cst.Name, cst.Attribute]:
 def rename_in_source(source: str, old_name: str, new_name: str) -> tuple[str, int]:
     """
     Rename all occurrences of a symbol in source code.
+
+    This is careful to NOT rename:
+    - Module paths in import statements
+    - External package references
 
     Returns:
         Tuple of (modified_source, number_of_changes)

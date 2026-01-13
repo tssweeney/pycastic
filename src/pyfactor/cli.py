@@ -10,7 +10,7 @@ from rich.panel import Panel
 
 from . import __version__
 from .core import move_file, move_symbol, rename_file, rename_symbol
-from .errors import PyfactorError
+from .errors import AmbiguousSymbolError, PyfactorError
 from .parsing import parse_target
 
 app = typer.Typer(
@@ -86,7 +86,13 @@ def rename(
     """
     try:
         parsed_target = parse_target(target)
-        changed_files = rename_symbol(project_root, parsed_target, new_name, dry_run)
+        changed_files, info_messages = rename_symbol(project_root, parsed_target, new_name, dry_run)
+
+        # Display info messages (e.g., warnings about other symbols with same name)
+        for msg in info_messages:
+            console.print(f"[dim]{msg}[/dim]")
+        if info_messages:
+            console.print()  # Blank line after info messages
 
         if dry_run:
             console.print(
@@ -101,6 +107,9 @@ def rename(
             for f in changed_files:
                 console.print(f"  - {f}")
 
+    except AmbiguousSymbolError as e:
+        console.print(f"[yellow]Ambiguous symbol:[/yellow] {e}")
+        raise typer.Exit(code=1)
     except PyfactorError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(code=1)

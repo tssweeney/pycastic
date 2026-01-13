@@ -19,7 +19,7 @@ class TestRenameSymbol:
     def test_rename_function_dry_run(self, simple_project):
         """Test renaming a function with dry run."""
         target = parse_target("example.py::old_name")
-        result = rename_symbol(simple_project, target, "new_name", dry_run=True)
+        result, info_messages = rename_symbol(simple_project, target, "new_name", dry_run=True)
         assert len(result) > 0
         assert "old_name" in result[0]
         assert "new_name" in result[0]
@@ -27,7 +27,7 @@ class TestRenameSymbol:
     def test_rename_function(self, simple_project):
         """Test actually renaming a function."""
         target = parse_target("example.py::old_name")
-        result = rename_symbol(simple_project, target, "new_name", dry_run=False)
+        result, info_messages = rename_symbol(simple_project, target, "new_name", dry_run=False)
         assert "example.py" in result
 
         # Verify the file was changed
@@ -38,7 +38,7 @@ class TestRenameSymbol:
     def test_rename_class(self, simple_project):
         """Test renaming a class."""
         target = parse_target("example.py::OldClass")
-        result = rename_symbol(simple_project, target, "NewClass", dry_run=False)
+        result, info_messages = rename_symbol(simple_project, target, "NewClass", dry_run=False)
         assert "example.py" in result
 
         content = (simple_project / "example.py").read_text()
@@ -59,7 +59,7 @@ class TestRenameSymbol:
 
         # Column 5 is where 'old_name' starts (after 'def ', 1-indexed)
         target = parse_target(f"example.py:{line_num}:5")
-        result = rename_symbol(simple_project, target, "renamed_func", dry_run=False)
+        result, info_messages = rename_symbol(simple_project, target, "renamed_func", dry_run=False)
 
         content = (simple_project / "example.py").read_text()
         assert "def renamed_func():" in content
@@ -67,7 +67,7 @@ class TestRenameSymbol:
     def test_rename_updates_references(self, temp_project):
         """Test that renaming updates all references."""
         target = parse_target("utils.py::helper_function")
-        result = rename_symbol(temp_project, target, "helper", dry_run=False)
+        result, info_messages = rename_symbol(temp_project, target, "helper", dry_run=False)
 
         # Should update utils.py
         assert any("utils.py" in f for f in result)
@@ -168,3 +168,45 @@ class TestErrorHandling:
         target = parse_target("example.py::nonexistent")
         with pytest.raises(SymbolNotFoundError):
             rename_symbol(simple_project, target, "new_name")
+
+
+class TestDisambiguation:
+    """Tests for symbol disambiguation."""
+
+    def test_multiple_definitions_same_file_raises_error(self, tmp_path):
+        """Test that multiple definitions of same name in same file raises AmbiguousSymbolError."""
+        from pyfactor.errors import AmbiguousSymbolError
+
+        # Create a file with two functions of the same name (in nested scopes)
+        # This is a contrived example - in reality, you'd have module-level duplicates
+        (tmp_path / "dupes.py").write_text("""
+x = 1
+x = 2  # Second assignment of x
+""")
+
+        target = parse_target("dupes.py::x")
+        with pytest.raises(AmbiguousSymbolError) as exc_info:
+            rename_symbol(tmp_path, target, "new_x")
+
+        assert "Multiple definitions" in str(exc_info.value)
+        assert "x" in str(exc_info.value)
+
+    def test_info_message_for_other_file_definitions(self, tmp_path):
+        """Test that info message is shown when symbol exists in other files."""
+        # Create multiple files with same symbol name
+        (tmp_path / "file1.py").write_text("""
+def helper():
+    return 1
+""")
+        (tmp_path / "file2.py").write_text("""
+def helper():
+    return 2
+""")
+
+        target = parse_target("file1.py::helper")
+        result, info_messages = rename_symbol(tmp_path, target, "new_helper", dry_run=True)
+
+        # Should have info messages about symbol in other files
+        assert len(info_messages) > 0
+        assert any("also defined" in msg for msg in info_messages)
+        assert any("file2.py" in msg for msg in info_messages)

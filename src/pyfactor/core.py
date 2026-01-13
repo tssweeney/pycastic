@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from .errors import RefactoringError, SymbolNotFoundError
+from .errors import AmbiguousSymbolError, RefactoringError, SymbolNotFoundError
 from .parsing import SymbolByName, SymbolByPosition, TargetSpec
 from .refactor import (
     add_definition,
@@ -87,7 +87,7 @@ def rename_symbol(
     target: TargetSpec,
     new_name: str,
     dry_run: bool = False,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """
     Rename a symbol across the codebase.
 
@@ -98,8 +98,11 @@ def rename_symbol(
         dry_run: If True, return description without applying
 
     Returns:
-        List of changed file paths (or descriptions if dry_run)
+        Tuple of (list of changed file paths, list of info messages)
+        Info messages include warnings about other symbols with the same name.
     """
+    info_messages = []
+
     try:
         file_path, old_name = _resolve_target(project_root, target)
 
@@ -115,6 +118,33 @@ def rename_symbol(
         definition = symbol_table.find_definition(file_path, old_name)
         if not definition:
             raise SymbolNotFoundError(f"Symbol '{old_name}' not found in {rel_path}")
+
+        # Check for multiple definitions with the same name
+        all_definitions = symbol_table.find_all_definitions_by_name(old_name)
+
+        # Check for multiple definitions in the same file
+        same_file_defs = [d for d in all_definitions if d.location.file_path == file_path]
+        if len(same_file_defs) > 1:
+            # Multiple definitions in the same file - ambiguous
+            match_info = []
+            for d in same_file_defs:
+                rel = d.location.file_path.relative_to(project_root)
+                match_info.append(f"  {rel}:{d.location.line}:{d.location.column} ({d.symbol_type})")
+            raise AmbiguousSymbolError(
+                f"Multiple definitions of '{old_name}' found in {rel_path}. "
+                f"Use line:column format to disambiguate:\n" + "\n".join(match_info),
+                matches=same_file_defs
+            )
+
+        # Check for definitions in other files - info message only
+        other_file_defs = [d for d in all_definitions if d.location.file_path != file_path]
+        if other_file_defs:
+            info_messages.append(f"Note: '{old_name}' is also defined in {len(other_file_defs)} other file(s):")
+            for d in other_file_defs[:5]:  # Show max 5
+                rel = d.location.file_path.relative_to(project_root)
+                info_messages.append(f"  {rel}:{d.location.line} ({d.symbol_type})")
+            if len(other_file_defs) > 5:
+                info_messages.append(f"  ... and {len(other_file_defs) - 5} more")
 
         # Collect changes
         changes = {}
@@ -166,15 +196,15 @@ def rename_symbol(
                 changes[py_file] = new_source
 
         if dry_run:
-            return _format_dry_run_changes(changes, project_root)
+            return _format_dry_run_changes(changes, project_root), info_messages
 
         # Apply changes
         for path, content in changes.items():
             path.write_text(content)
 
-        return [str(p.relative_to(project_root)) for p in changes.keys()]
+        return [str(p.relative_to(project_root)) for p in changes.keys()], info_messages
 
-    except (SymbolNotFoundError, RefactoringError):
+    except (SymbolNotFoundError, RefactoringError, AmbiguousSymbolError):
         raise
     except Exception as e:
         raise RefactoringError(f"Failed to rename symbol: {e}") from e

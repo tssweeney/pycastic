@@ -21,6 +21,18 @@ class SymbolNotFoundError(PyfactorError):
     pass
 
 
+class AmbiguousSymbolError(PyfactorError):
+    """Multiple symbols with the same name exist.
+
+    This error includes information about all matching symbols
+    to help the user disambiguate.
+    """
+
+    def __init__(self, message: str, matches: list = None):
+        super().__init__(message)
+        self.matches = matches or []
+
+
 class RefactoringError(PyfactorError):
     """Error during rope refactoring operation."""
 
