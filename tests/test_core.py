@@ -4,33 +4,13 @@ from pathlib import Path
 import pytest
 
 from pyfactor.core import (
-    RopeProject,
-    _get_resource,
     move_file,
     move_symbol,
     rename_file,
     rename_symbol,
 )
-from pyfactor.errors import RefactoringError
+from pyfactor.errors import RefactoringError, SymbolNotFoundError
 from pyfactor.parsing import parse_target
-
-
-class TestRopeProject:
-    """Tests for RopeProject context manager."""
-
-    def test_context_manager_opens_project(self, simple_project):
-        """Test that RopeProject opens a project."""
-        with RopeProject(simple_project) as project:
-            assert project is not None
-            assert project.root is not None
-
-    def test_context_manager_closes_project(self, simple_project):
-        """Test that RopeProject closes the project on exit."""
-        rope_project = RopeProject(simple_project)
-        with rope_project as project:
-            assert project is not None
-        # Project should be closed after exit
-        assert rope_project.project is not None
 
 
 class TestRenameSymbol:
@@ -89,12 +69,12 @@ class TestRenameSymbol:
         target = parse_target("utils.py::helper_function")
         result = rename_symbol(temp_project, target, "helper", dry_run=False)
 
-        # Should update both utils.py and main.py
+        # Should update utils.py
         assert any("utils.py" in f for f in result)
 
-        # Check main.py still imports correctly
-        main_content = (temp_project / "main.py").read_text()
-        assert "helper" in main_content
+        # Check utils.py was updated
+        utils_content = (temp_project / "utils.py").read_text()
+        assert "def helper(" in utils_content
 
 
 class TestRenameFile:
@@ -148,6 +128,10 @@ class TestMoveSymbol:
         main_content = (temp_project / "main.py").read_text()
         assert "def helper_function" in main_content
 
+        # Function should be removed from utils.py
+        utils_content = (temp_project / "utils.py").read_text()
+        assert "def helper_function" not in utils_content
+
 
 class TestMoveFile:
     """Tests for move_file function."""
@@ -170,26 +154,17 @@ class TestMoveFile:
         assert (temp_project / "subpkg" / "utils.py").exists()
 
 
-class TestGetResource:
-    """Tests for _get_resource helper."""
+class TestErrorHandling:
+    """Tests for error handling."""
 
-    def test_get_resource_relative_path(self, simple_project):
-        """Test getting resource with relative path."""
-        with RopeProject(simple_project) as project:
-            resource = _get_resource(project, Path("example.py"))
-            assert resource is not None
-            assert resource.exists()
+    def test_rename_nonexistent_file(self, simple_project):
+        """Test renaming in a nonexistent file."""
+        target = parse_target("nonexistent.py::symbol")
+        with pytest.raises(RefactoringError):
+            rename_symbol(simple_project, target, "new_name")
 
-    def test_get_resource_absolute_path(self, simple_project):
-        """Test getting resource with absolute path."""
-        with RopeProject(simple_project) as project:
-            abs_path = simple_project / "example.py"
-            resource = _get_resource(project, abs_path)
-            assert resource is not None
-            assert resource.exists()
-
-    def test_get_resource_nonexistent_raises(self, simple_project):
-        """Test that nonexistent file raises."""
-        with RopeProject(simple_project) as project:
-            with pytest.raises(Exception):
-                _get_resource(project, Path("nonexistent.py"))
+    def test_rename_nonexistent_symbol(self, simple_project):
+        """Test renaming a nonexistent symbol."""
+        target = parse_target("example.py::nonexistent")
+        with pytest.raises(SymbolNotFoundError):
+            rename_symbol(simple_project, target, "new_name")

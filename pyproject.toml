@@ -1,11 +1,11 @@
 [project]
 name = "pyfactor"
-version = "0.1.0"
-description = "Python refactoring CLI tool powered by rope"
+version = "0.2.0"
+description = "Python refactoring CLI tool powered by LibCST"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "rope>=1.14.0",
+    "libcst>=1.1.0",
     "typer>=0.12.0",
     "rich>=13.0.0",
 ]

@@ -15,7 +15,7 @@ from .parsing import parse_target
 
 app = typer.Typer(
     name="pyfactor",
-    help="Python refactoring CLI tool powered by rope.",
+    help="Python refactoring CLI tool powered by LibCST.",
     add_completion=False,
 )
 console = Console()

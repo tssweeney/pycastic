@@ -9,8 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Union
 
-from rope.base.project import Project
-
 from .errors import SymbolNotFoundError, TargetParseError
 
 
@@ -71,43 +69,6 @@ def parse_target(target: str) -> TargetSpec:
         f"Invalid target format: '{target}'. "
         f"Use 'file.py::SymbolName' or 'file.py:line:column'"
     )
-
-
-def resolve_offset(project: Project, spec: TargetSpec) -> tuple:
-    """
-    Resolve a target specification to a rope Resource and offset.
-
-    Args:
-        project: The rope Project instance
-        spec: A parsed target specification
-
-    Returns:
-        Tuple of (resource, offset) for rope operations
-    """
-    # Use project.get_resource with path relative to project root
-    path_str = str(spec.file_path)
-    if path_str.startswith("/"):
-        # Convert absolute path to relative
-        project_root = Path(project.root.real_path)
-        rel_path = Path(spec.file_path).relative_to(project_root)
-        path_str = str(rel_path)
-    resource = project.get_resource(path_str)
-
-    if isinstance(spec, SymbolByPosition):
-        # Convert line:column to character offset
-        content = resource.read()
-        lines = content.splitlines(keepends=True)
-        offset = sum(len(lines[i]) for i in range(spec.line - 1))
-        offset += spec.column - 1  # Column is 1-indexed
-        return resource, offset
-
-    elif isinstance(spec, SymbolByName):
-        # Find symbol by name in the file
-        content = resource.read()
-        offset = find_symbol_offset(content, spec.symbol_name)
-        return resource, offset
-
-    raise TargetParseError(f"Unknown target specification type: {type(spec)}")
 
 
 def find_symbol_offset(content: str, symbol_name: str) -> int:
