@@ -123,11 +123,14 @@ pycastic src/utils.py lib/
 pycastic is a shareable Claude Code plugin. Install it via:
 
 ```bash
-# In Claude Code, use the /plugin command
-/plugin install github:tssweeney/pycastic
+# First, add the marketplace
+/plugin marketplace add tssweeney/pycastic
+
+# Then install the plugin
+/plugin install pycastic@pycastic
 ```
 
-Or add to your project's plugin configuration.
+Or browse available plugins with `/plugin menu` after adding the marketplace.
 
 ### Plugin Structure
 

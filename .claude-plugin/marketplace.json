@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pycastic",
+  "version": "0.0.1",
+  "description": "Python refactoring tools - rename and move symbols and files with automatic import updates",
+  "owner": {
+    "name": "tssweeney"
+  },
+  "plugins": [
+    {
+      "name": "pycastic",
+      "description": "Python refactoring skill using pycastic CLI - rename/move symbols and files with automatic import updates across the codebase",
+      "version": "0.0.1",
+      "author": {
+        "name": "tssweeney"
+      },
+      "source": ".",
+      "category": "development"
+    }
+  ]
+}
