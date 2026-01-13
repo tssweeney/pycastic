@@ -8,7 +8,7 @@ description: Renames and moves Python symbols and files using pycastic CLI, with
 ## Command syntax
 
 ```bash
-pycastic SOURCE TARGET [OPTIONS]
+uvx pycastic SOURCE TARGET [OPTIONS]
 ```
 
 Operation is auto-detected from arguments.
@@ -17,23 +17,23 @@ Operation is auto-detected from arguments.
 
 ```bash
 # Rename symbol
-pycastic file.py::old_name file.py::new_name
+uvx pycastic file.py::old_name file.py::new_name
 
 # Move symbol to another file
-pycastic file.py::symbol dest.py
+uvx pycastic file.py::symbol dest.py
 
 # Move multiple symbols
-pycastic file.py::a,b,c dest.py
+uvx pycastic file.py::a,b,c dest.py
 ```
 
 ## File operations
 
 ```bash
 # Rename file (same directory)
-pycastic old.py new.py
+uvx pycastic old.py new.py
 
 # Move file to directory
-pycastic file.py dir/
+uvx pycastic file.py dir/
 ```
 
 ## Options
@@ -50,10 +50,10 @@ When moving a symbol that depends on code also used by remaining symbols:
 
 ```bash
 # Include deps in move (source imports from dest)
-pycastic src.py::func_a dest.py --include-deps
+uvx pycastic src.py::func_a dest.py --include-deps
 
 # Extract deps to common file
-pycastic src.py::func_a dest.py --shared-file
+uvx pycastic src.py::func_a dest.py --shared-file
 ```
 
 ## Notes
